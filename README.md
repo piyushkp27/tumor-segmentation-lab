@@ -11,8 +11,13 @@ same MRI slice three times and compare the results:
 3. **Active contour (snake)**: Kass–Witkin–Terzopoulos snake with a Cohen balloon
    force, animated, with sliders for α, β, w, κ and σ, the edge map, and the force
    field. Optional: seeded region growing.
-4. **Compare**: outlines or an agreement map, plus Dice and HD95 against a reference
-   of your choice.
+4. **Compare**: outlines or an agreement map, a Dice score for every pair of the three
+   methods (and for each method against the ground truth, when there is one), Dice and
+   HD95 against a reference of your choice, and PNG export of the original image and of
+   each method's mask (binary, white = tumor, at the original image size).
+
+You can load your own image, and a ground-truth mask for it (a binary PNG; 0/255 or
+0/1 both work). The mask is then scored against every method.
 
 Image C is a simulated phantom with a stored true mask, so it is the one case
 where every method can be scored against the right answer.

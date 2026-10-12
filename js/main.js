@@ -1,6 +1,6 @@
 // Page start-up: load an image, build the case picker, start the exercises.
 
-import { app, emit } from './state.js';
+import { app, emit, setMask } from './state.js';
 import { initManual } from './manual.js';
 import { initOtsu } from './otsu.js';
 import { initSnake } from './snake.js';
@@ -64,19 +64,78 @@ function makeCase(id, title, img) {
     d[4 * i + 3] = 255;
   }
   ctx.putImageData(id0, 0, 0); // show exactly what the algorithms see
-  return { id, title, w, h, gray, base, masks: {}, info: {}, ui: {} };
+  const orig = { img, w: img.naturalWidth, h: img.naturalHeight };
+  return { id, title, w, h, gray, base, orig, masks: {}, info: {}, ui: {} };
 }
 
+// Read a binary mask image at the working size. Works for 0/255 and for 0/1 PNGs:
+// anything brighter than half the brightest pixel counts as tumor.
 function maskFromImage(img, w, h) {
   const cv = document.createElement('canvas');
   cv.width = w;
   cv.height = h;
   const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
   ctx.drawImage(img, 0, 0, w, h);
   const d = ctx.getImageData(0, 0, w, h).data;
+  const v = new Float32Array(w * h);
+  let max = 0;
+  for (let i = 0; i < w * h; i++) {
+    v[i] = Math.max(d[4 * i], d[4 * i + 1], d[4 * i + 2]);
+    if (v[i] > max) max = v[i];
+  }
   const m = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) m[i] = d[4 * i] > 127 ? 1 : 0;
+  if (max > 0) for (let i = 0; i < w * h; i++) m[i] = v[i] > max / 2 ? 1 : 0;
   return m;
+}
+
+function buildMaskUpload() {
+  const input = document.getElementById('upload-mask');
+  const status = document.getElementById('mask-status');
+  const remove = document.getElementById('mask-remove');
+
+  const show = () => {
+    const c = app.cur;
+    if (!c) return;
+    remove.hidden = !c.masks.truth || !c.truthFromUser;
+    status.textContent = c.masks.truth
+      ? (c.truthFromUser ? `Loaded for this image: ${c.info.truth}` : 'This image already has a stored ground truth. Loading one replaces it.')
+      : 'No ground truth for this image yet.';
+  };
+
+  document.getElementById('mask-load').addEventListener('click', () => input.click());
+  remove.addEventListener('click', () => {
+    app.cur.truthFromUser = false;
+    setMask('truth', null);
+    show();
+  });
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file || !app.cur) return;
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await loadImage(url);
+      const c = app.cur;
+      const m = maskFromImage(img, c.w, c.h);
+      let n = 0;
+      for (let i = 0; i < m.length; i++) n += m[i];
+      if (!n) throw new Error(`${file.name} has no white pixels, so it cannot be a tumor mask`);
+      const sameShape = Math.abs(img.naturalWidth / img.naturalHeight - c.orig.w / c.orig.h) < 0.01;
+      c.truthFromUser = true;
+      setMask('truth', m, `${file.name}, ${img.naturalWidth} × ${img.naturalHeight}` +
+        (sameShape ? '' : ' (WARNING: not the same shape as the image, so it was stretched to fit)'));
+    } catch (err) {
+      status.textContent = err.message;
+      return;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+    show();
+  });
+  return show;
 }
 
 async function selectCase(def) {
@@ -95,6 +154,7 @@ async function selectCase(def) {
     b.setAttribute('aria-pressed', String(b.dataset.id === def.id));
   }
   emit('case', c);
+  showMask();
 }
 
 function buildPicker() {
@@ -128,7 +188,9 @@ function buildPicker() {
     try {
       const img = await loadImage(url);
       const def = { id: `own-${++n}`, title: file.name };
-      loaded.set(def.id, makeCase(def.id, `Your image (${file.name})`, img));
+      const c = makeCase(def.id, `Your image (${file.name})`, img);
+      c.fileName = file.name;
+      loaded.set(def.id, c);
       own.querySelector('.blank, img').outerHTML = `<img src="${url}" alt="" width="190" height="190">`;
       own.dataset.id = def.id;
       await selectCase(def);
@@ -166,6 +228,7 @@ function report(err) {
 
 buildPicker();
 buildTabs();
+const showMask = buildMaskUpload();
 initManual();
 initOtsu();
 initSnake();

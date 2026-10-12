@@ -319,3 +319,15 @@ ol.refs li { margin-bottom: 6px; }
 
 footer { border-top: 1px solid var(--rule); margin-top: 70px; padding: 22px 0 40px; font: 14px/1.5 var(--sans); color: var(--ink-2); }
 footer p { margin: 0 0 6px; max-width: none; }
+
+/* ground-truth upload */
+.truth-row { margin: 14px 0 0; padding: 10px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); font: 15px/1.45 var(--sans); }
+.truth-row p { margin: 0; max-width: none; }
+
+/* Dice scorecard */
+.scores { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 10px 0 6px; }
+.score { background: #fff; border: 1px solid var(--rule); padding: 10px 14px; font: 14px/1.4 var(--sans); }
+.score .pair { color: var(--ink-2); }
+.score .val { display: block; font: 600 28px/1.2 var(--mono); color: var(--ink); margin-top: 4px; }
+.score .val.missing { font: 14px/1.4 var(--sans); color: var(--ink-2); margin-top: 8px; }
+.score.truth { border-color: var(--ink); }

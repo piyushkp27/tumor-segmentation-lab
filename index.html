@@ -42,6 +42,15 @@
   <p>Pick the slice you want to work on. Start with <b>A</b>. Each image keeps its own masks, so you can come back later and repeat the lab on another one.</p>
   <div class="cases" id="case-picker"></div>
   <input type="file" id="upload" accept="image/*" hidden>
+  <input type="file" id="upload-mask" accept="image/png,image/*" hidden>
+  <div class="truth-row">
+    <p><b>Have a ground-truth mask for this image?</b> Load it as a binary PNG (white = tumor, black = background, same shape as the image). It is then scored against every method in Exercise 4.</p>
+    <div class="row">
+      <button id="mask-load">Load ground-truth mask&hellip;</button>
+      <button id="mask-remove" hidden>Remove it</button>
+      <span class="small" id="mask-status" style="margin:0"></span>
+    </div>
+  </div>
   <p class="credit">A and B: axial MRI of a glioblastoma by Hellerhoff, <a href="https://commons.wikimedia.org/wiki/File:Glioblastoma_multiforme_-_MRT_T1KM_ax.jpg">Wikimedia Commons</a>, <a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>, cropped and resized. C: generated for this lab.</p>
 
   <div class="note">
@@ -386,10 +395,22 @@
         <select id="c-ref"></select>
       </fieldset>
       <fieldset>
-        <div class="row" style="margin-top:0"><button id="c-download">Save figure as PNG</button></div>
+        <legend>Save as PNG</legend>
+        <div class="row" style="margin-top:0">
+          <button id="c-save-all" class="primary">Save all</button>
+          <button id="c-save-image">Original image</button>
+          <button id="c-save-manual">Hand-drawn mask</button>
+          <button id="c-save-otsu">Otsu mask</button>
+          <button id="c-save-snake">Snake mask</button>
+          <button id="c-download">Comparison figure</button>
+        </div>
+        <p class="small">Masks are saved as binary PNGs (white = tumor) at the size of the original image, so they line up with it pixel for pixel.</p>
       </fieldset>
     </div>
   </div>
+
+  <h3>Dice scores for the three methods</h3>
+  <div class="scores" id="c-scores"></div>
 
   <div class="strip" id="c-thumbs"></div>
   <div class="table-wrap"><table id="c-table"></table></div>

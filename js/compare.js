@@ -12,7 +12,7 @@ const METHODS = [
   { key: 'otsu', name: 'Otsu threshold' },
   { key: 'snake', name: 'Active contour' },
   { key: 'grow', name: 'Region growing' },
-  { key: 'truth', name: 'True mask (phantom only)' },
+  { key: 'truth', name: 'Ground truth' },
 ];
 
 // agreement map colours: one mask -> all masks
@@ -170,6 +170,94 @@ export function initCompare() {
     pairs.innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
   }
 
+  // One card per pair of the three methods, plus each method against the ground truth.
+  function buildScores() {
+    const c = app.cur;
+    const M = c.masks;
+    const name = { manual: 'By hand', otsu: 'Otsu', snake: 'Snake', truth: 'Ground truth' };
+    const where = { manual: 'Exercise 1', otsu: 'Exercise 2', snake: 'Exercise 3a' };
+    const card = (a, b) => {
+      const missing = [a, b].filter((k) => !M[k]);
+      const val = missing.length
+        ? `<span class="val missing">Needs a mask from ${missing.map((k) => where[k] || name[k]).join(' and ')}.</span>`
+        : `<span class="val">${fmt(dice(M[a], M[b]), 3)}</span>`;
+      return `<div class="score${b === 'truth' ? ' truth' : ''}">
+        <span class="pair"><span class="sw ${a}"></span> ${name[a]} vs. <span class="sw ${b}"></span> ${name[b]}</span>${val}</div>`;
+    };
+    let html = card('manual', 'otsu') + card('manual', 'snake') + card('otsu', 'snake');
+    if (M.truth) html += card('manual', 'truth') + card('otsu', 'truth') + card('snake', 'truth');
+    $('c-scores').innerHTML = html;
+  }
+
+  // ------------------------------------------------------------ saving
+
+  function baseName() {
+    const c = app.cur;
+    const stem = c.fileName ? c.fileName.replace(/\.[^.]+$/, '') : `image-${c.id}`;
+    return stem.replace(/[^\w.-]+/g, '_');
+  }
+
+  function savePng(canvas, filename) {
+    canvas.toBlob((blob) => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }, 'image/png');
+  }
+
+  function saveImage() {
+    const { orig } = app.cur;
+    const cvs = document.createElement('canvas');
+    cvs.width = orig.w;
+    cvs.height = orig.h;
+    cvs.getContext('2d').drawImage(orig.img, 0, 0);
+    savePng(cvs, `${baseName()}.png`);
+  }
+
+  // Binary mask, 0 or 255, scaled back to the original image size (nearest neighbour).
+  function saveMask(key) {
+    const c = app.cur, m = c.masks[key];
+    if (!m) return false;
+    const small = document.createElement('canvas');
+    small.width = c.w;
+    small.height = c.h;
+    const sctx = small.getContext('2d');
+    const id = sctx.createImageData(c.w, c.h);
+    for (let i = 0; i < c.w * c.h; i++) {
+      const v = m[i] ? 255 : 0;
+      id.data[4 * i] = id.data[4 * i + 1] = id.data[4 * i + 2] = v;
+      id.data[4 * i + 3] = 255;
+    }
+    sctx.putImageData(id, 0, 0);
+    const out = document.createElement('canvas');
+    out.width = c.orig.w;
+    out.height = c.orig.h;
+    const octx = out.getContext('2d');
+    octx.imageSmoothingEnabled = false;
+    octx.drawImage(small, 0, 0, out.width, out.height);
+    // make sure no grey pixels survive the scaling
+    const d = octx.getImageData(0, 0, out.width, out.height);
+    for (let i = 0; i < d.data.length; i += 4) {
+      const v = d.data[i] >= 128 ? 255 : 0;
+      d.data[i] = d.data[i + 1] = d.data[i + 2] = v;
+      d.data[i + 3] = 255;
+    }
+    octx.putImageData(d, 0, 0);
+    savePng(out, `${baseName()}_mask_${{ manual: 'hand', otsu: 'otsu', snake: 'snake' }[key]}.png`);
+    return true;
+  }
+
+  function updateSaveButtons() {
+    const M = app.cur ? app.cur.masks : {};
+    $('c-save-manual').disabled = !M.manual;
+    $('c-save-otsu').disabled = !M.otsu;
+    $('c-save-snake').disabled = !M.snake;
+  }
+
   function short(m) {
     return { manual: 'Hand 1', manual2: 'Hand 2', otsu: 'Otsu', snake: 'Snake', grow: 'Growing', truth: 'Truth' }[m.key];
   }
@@ -182,6 +270,8 @@ export function initCompare() {
     renderCanvas();
     buildThumbs();
     buildTables();
+    buildScores();
+    updateSaveButtons();
   }
 
   function schedule() {
@@ -208,6 +298,16 @@ export function initCompare() {
     buildTables();
   });
   $('c-download').addEventListener('click', download);
+  $('c-save-image').addEventListener('click', () => app.cur && saveImage());
+  for (const k of ['manual', 'otsu', 'snake']) {
+    $(`c-save-${k}`).addEventListener('click', () => app.cur && saveMask(k));
+  }
+  // browsers may block several downloads fired at once, so space them out
+  $('c-save-all').addEventListener('click', () => {
+    if (!app.cur) return;
+    const jobs = [saveImage, ...['manual', 'otsu', 'snake'].filter((k) => app.cur.masks[k]).map((k) => () => saveMask(k))];
+    jobs.forEach((job, i) => setTimeout(job, i * 400));
+  });
 
   function download() {
     const c = app.cur;
@@ -232,13 +332,7 @@ export function initCompare() {
       o.fillStyle = '#1e1d1a';
       o.fillText(`${m.name} · ${area(c.masks[m.key]).toLocaleString()} px`, pad + 22, y);
     });
-    out.toBlob((blob) => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `lab1-masks-${c.id}.png`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    });
+    savePng(out, `${baseName()}_comparison.png`);
   }
 
   on('case', schedule);
