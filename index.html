@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lab 1 · Three ways to outline a brain tumor</title>
+<meta name="description" content="Interactive lab: segment the same brain MRI by hand, with Otsu's threshold and with an active contour, then compare the masks.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous">
+<link rel="stylesheet" href="css/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" crossorigin="anonymous"
+  onload="renderMathInElement(document.body, {delimiters: [{left: '\\[', right: '\\]', display: true}, {left: '\\(', right: '\\)', display: false}]})"></script>
+<script type="module" src="js/main.js"></script>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <p class="kicker">Lab 1 &middot; Image segmentation</p>
+    <h1>Three ways to outline a brain tumor</h1>
+    <p class="lede">Segmentation means deciding, for every pixel, whether it belongs to the object you care about. In this lab you segment the same tumor on the same MRI slice three times: by hand, with Otsu&rsquo;s threshold, and with an active contour (a &ldquo;snake&rdquo;). Then you lay the masks on top of each other and measure how far apart they are.</p>
+    <p class="meta">About 40 minutes. Work from top to bottom. Everything runs in your browser and nothing is uploaded.</p>
+    <nav class="toc" aria-label="Contents">
+      <a href="#data"><span>0</span>The image</a>
+      <a href="#manual"><span>1</span>By hand</a>
+      <a href="#otsu"><span>2</span>Otsu&rsquo;s threshold</a>
+      <a href="#snake"><span>3</span>Active contour</a>
+      <a href="#compare"><span>4</span>Compare</a>
+      <a href="#notes"><span>5</span>Summary and reading</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+<!-- ================================================================ 0 -->
+<section id="data">
+  <h2><span class="num">0</span>The image</h2>
+  <p>Pick the slice you want to work on. Start with <b>A</b>. Each image keeps its own masks, so you can come back later and repeat the lab on another one.</p>
+  <div class="cases" id="case-picker"></div>
+  <input type="file" id="upload" accept="image/*" hidden>
+  <p class="credit">A and B: axial MRI of a glioblastoma by Hellerhoff, <a href="https://commons.wikimedia.org/wiki/File:Glioblastoma_multiforme_-_MRT_T1KM_ax.jpg">Wikimedia Commons</a>, <a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>, cropped and resized. C: generated for this lab.</p>
+
+  <div class="note">
+    <p><b>What counts as &ldquo;the tumor&rdquo;?</b> A glioblastoma has three parts: an <i>enhancing rim</i> that lights up after gadolinium contrast, a dark <i>necrotic core</i> of dead tissue inside the rim, and <i>edema</i> (swelling) spreading into the surrounding white matter. The BraTS benchmark calls rim plus core the <i>tumor core</i>, and that is what we outline in this lab: the bright rim and everything inside it, but not the edema.</p>
+    <p>Somebody chose that definition. Nothing in the image settles it for you.</p>
+  </div>
+</section>
+
+<!-- ================================================================ 1 -->
+<section id="manual">
+  <h2><span class="num">1</span>Draw it by hand</h2>
+  <p>Hand-drawn outlines are still the reference standard. Radiotherapy targets are drawn by hand, and so is every mask in the datasets that segmentation networks are trained on. Drawing them is slow, though, and nobody draws the same outline twice.</p>
+
+  <ol class="tasks">
+    <li><b>1.1</b> Choose <i>Outline</i> and trace around the tumor in one stroke. When you let go, the inside fills in. Fix mistakes with <i>Brush</i> and <i>Eraser</i>.</li>
+    <li><b>1.2</b> Move the cursor slowly across the edge of the tumor and watch the magnifier. Is the edge a line, or a ramp?</li>
+    <li><b>1.3</b> When you are happy, press <i>Draw it again</i>. Your first mask is hidden. Outline the same tumor a second time, then press <i>Compare attempts</i>.</li>
+  </ol>
+
+  <div class="lab">
+    <figure class="fig">
+      <canvas class="view" id="m-canvas" width="512" height="512"></canvas>
+      <figcaption><b>Fig. 1.</b> <span id="m-caption">Your mask, attempt 1 <span class="sw manual"></span>.</span> <span id="m-hint">Drag to outline the tumor.</span></figcaption>
+    </figure>
+
+    <div class="controls">
+      <fieldset>
+        <legend>Tool</legend>
+        <div class="seg" role="radiogroup" aria-label="Drawing tool">
+          <label><input type="radio" name="m-tool" value="lasso" checked><span>Outline</span></label>
+          <label><input type="radio" name="m-tool" value="brush"><span>Brush</span></label>
+          <label><input type="radio" name="m-tool" value="erase"><span>Eraser</span></label>
+        </div>
+        <label class="slider"><span>Brush size</span><output id="m-size-out">8 px</output>
+          <input id="m-size" type="range" min="1" max="40" value="8"></label>
+        <label class="slider"><span>Mask opacity</span><output id="m-opacity-out">35 %</output>
+          <input id="m-opacity" type="range" min="0" max="100" value="35"></label>
+        <div class="row">
+          <button id="m-undo">Undo</button>
+          <button id="m-clear">Clear</button>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Magnifier, 8&times;</legend>
+        <div class="loupe-row">
+          <canvas id="m-loupe" width="176" height="176"></canvas>
+          <p class="small">Each square is one pixel. Hover across the bright rim: the brightness changes over several pixels, so the edge has no single obvious position.</p>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Your effort</legend>
+        <dl class="stats">
+          <dt>Area</dt><dd id="m-area">0 px</dd>
+          <dt>Strokes</dt><dd id="m-strokes">0</dd>
+          <dt>Time</dt><dd id="m-time">0:00</dd>
+        </dl>
+        <p class="small">Time runs from your first stroke to your last.</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Repeatability test</legend>
+        <p class="small" id="m-attempt" style="margin-top:0">You are on attempt 1.</p>
+        <div class="row">
+          <button id="m-again" disabled>Draw it again</button>
+          <button id="m-compare" disabled>Compare attempts</button>
+          <button id="m-restart" hidden>Start over</button>
+        </div>
+        <p class="small" id="m-repeat"></p>
+      </fieldset>
+    </div>
+  </div>
+
+  <div class="questions">
+    <h3>Questions</h3>
+    <ol>
+      <li>Where along the boundary were you least sure, and why?</li>
+      <li>A 3-D scan with 1&nbsp;mm slices has about 150 axial slices, and a tumor this size spans roughly 40 of them. At your pace, how long would a full 3-D outline take?</li>
+      <li>What Dice did you get between your two attempts? If you do not agree with yourself five minutes later, how well would you expect two radiologists to agree?</li>
+    </ol>
+  </div>
+  <details class="discuss">
+    <summary>What you should notice</summary>
+    <ul>
+      <li>Up close the edge is several pixels wide. Some of that is blur, and some is <i>partial volume</i>: a pixel on the boundary holds a bit of tumor and a bit of normal tissue, so its brightness falls in between. Wherever you put the line, you made a choice.</li>
+      <li>Your two attempts mostly disagree in a thin band along the boundary. For a large tumor that band is a small share of the area, so Dice stays high. For a small lesion the same band would pull Dice down a lot.</li>
+      <li>You used knowledge no algorithm on this page has: what a tumor looks like, where the ventricles are, and which bright spots are vessels.</li>
+    </ul>
+  </details>
+</section>
+
+<!-- ================================================================ 2 -->
+<section id="otsu">
+  <h2><span class="num">2</span>Otsu&rsquo;s threshold</h2>
+  <p>A threshold \(t\) splits the pixels into two classes: background (\(I \le t\)) and object (\(I &gt; t\)). Otsu (1979) chooses the \(t\) that pushes the two classes furthest apart, measured by the between-class variance</p>
+  \[ \sigma_B^2(t) = \omega_0(t)\,\omega_1(t)\,\bigl[\mu_0(t) - \mu_1(t)\bigr]^2 \]
+  <p>where \(\omega_0, \omega_1\) are the fractions of pixels in each class and \(\mu_0, \mu_1\) are their mean intensities. Otsu only ever looks at the histogram. It does not know where a pixel is or what its neighbors look like.</p>
+
+  <ol class="tasks">
+    <li><b>2.1</b> With <i>Whole image</i> selected, look at what Otsu calls object. Then drag the threshold in the histogram (Fig.&nbsp;2b). Can any single \(t\) pick out only the tumor?</li>
+    <li><b>2.2</b> Drag a box around the tumor on the image. Now only the pixels inside the box go into the histogram. Where does \(t^*\) move, and why?</li>
+    <li><b>2.3</b> Switch on the clean-up steps one at a time and follow them in Fig.&nbsp;2c. Click on the tumor to tell <i>Keep one blob</i> which blob you mean.</li>
+  </ol>
+
+  <div class="lab wide-right">
+    <figure class="fig">
+      <canvas class="view" id="o-canvas" width="512" height="512"></canvas>
+      <figcaption><b>Fig. 2a.</b> Pixels Otsu calls object <span class="sw otsu"></span>. <span id="o-hint">Drag on the image to draw a box. Click to choose a blob.</span></figcaption>
+    </figure>
+
+    <div class="controls">
+      <figure class="hist">
+        <canvas id="o-hist" width="880" height="400"></canvas>
+        <figcaption><b>Fig. 2b.</b> Histogram of the pixels used (grey: class 0, cyan: class 1) and the between-class variance \(\sigma_B^2(t)\) in red. The dashed line is Otsu&rsquo;s choice \(t^*\). Click or drag to set \(t\) yourself.</figcaption>
+      </figure>
+      <dl class="stats" id="o-readout"></dl>
+
+      <fieldset style="margin-top:10px">
+        <legend>Step 1 &middot; Smooth first</legend>
+        <label class="slider"><span>Gaussian blur &sigma;</span><output id="o-sigma-out">0 px</output>
+          <input id="o-sigma" type="range" min="0" max="3" step="0.25" value="0"></label>
+      </fieldset>
+      <fieldset>
+        <legend>Step 2 &middot; Pixels in the histogram</legend>
+        <div class="seg" role="radiogroup" aria-label="Histogram region">
+          <label><input type="radio" name="o-roi" value="all" checked><span>Whole image</span></label>
+          <label><input type="radio" name="o-roi" value="box"><span>Inside my box</span></label>
+        </div>
+        <p class="small" id="o-roi-hint"></p>
+      </fieldset>
+      <fieldset>
+        <legend>Step 3 &middot; Threshold</legend>
+        <label class="slider"><span>t</span><output id="o-t-out">0</output>
+          <input id="o-t" type="range" min="0" max="255" value="0"></label>
+        <div class="row">
+          <button id="o-snap">Use Otsu&rsquo;s t*</button>
+          <label class="check"><input type="checkbox" id="o-log" checked><span>Log scale</span></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Step 4 &middot; Clean up</legend>
+        <label class="slider"><span>Opening radius (cuts thin bridges)</span><output id="o-open-out">0 px</output>
+          <input id="o-open" type="range" min="0" max="4" value="0"></label>
+        <label class="check"><input type="checkbox" id="o-keep"><span>Keep one blob (click it on the image)</span></label>
+        <label class="check"><input type="checkbox" id="o-fill"><span>Fill holes</span></label>
+        <p class="small" id="o-note"></p>
+      </fieldset>
+    </div>
+  </div>
+
+  <div class="strip" id="o-steps">
+    <figure><canvas width="160" height="160"></canvas><figcaption></figcaption></figure>
+    <figure><canvas width="160" height="160"></canvas><figcaption></figcaption></figure>
+    <figure><canvas width="160" height="160"></canvas><figcaption></figcaption></figure>
+    <figure><canvas width="160" height="160"></canvas><figcaption></figcaption></figure>
+  </div>
+  <p class="small"><b>Fig. 2c.</b> The binary mask after each step. White pixels are object. Faded steps are switched off.</p>
+
+  <div class="questions">
+    <h3>Questions</h3>
+    <ol>
+      <li>Otsu assumes there are two classes. How many kinds of tissue can you see in this image?</li>
+      <li>Why does the center of the tumor come out as a hole? Which step fills it, and when would that step be wrong?</li>
+      <li>Switch to image B (T2). What else is as bright as the tumor?</li>
+      <li>Count the decisions you made: smoothing, box, threshold, opening, which blob, filling. Is this method automatic?</li>
+    </ol>
+  </div>
+  <details class="discuss">
+    <summary>What you should notice</summary>
+    <ul>
+      <li>On the whole image Otsu has to squeeze air, CSF, grey matter, white matter, fat, bone and tumor into two classes. On A it cuts between the brain and the bright scalp fat, so the object class is the ring of scalp plus the brightest parts of the rim. On B it collects CSF, tumor and scalp together. On C it simply separates air from head. The tumor never gets a class of its own.</li>
+      <li>Inside a box the histogram holds only brain and tumor, so \(t^*\) moves to the gap between those two and the bright rim separates from the tissue around it. Anything in the box that is as bright as the rim still comes along, such as a vessel or the edge of a ventricle. You got rid of it by clicking on the right blob, so the spatial knowledge came from you, not from Otsu.</li>
+      <li>The necrotic core is darker than \(t\), so it comes out as a hole. <i>Fill holes</i> repairs it, but only because you already know this tumor is solid.</li>
+    </ul>
+  </details>
+</section>
+
+<!-- ================================================================ 3 -->
+<section id="snake">
+  <h2><span class="num">3</span>Active contour (snake)</h2>
+  <p>A snake is a closed curve made of points \(v_1, \dots, v_n\). It slides over the image to lower an energy (Kass, Witkin and Terzopoulos, 1988):</p>
+  \[ E = \sum_i \Bigl( \underbrace{\alpha\,\lvert v_{i+1}-v_i\rvert^2}_{\text{tension}} + \underbrace{\beta\,\lvert v_{i-1}-2v_i+v_{i+1}\rvert^2}_{\text{bending}} - \underbrace{w\,P(v_i)}_{\text{edges}} \Bigr) \]
+  <p>Here \(P = \lvert \nabla (G_\sigma * I) \rvert\) is the <i>edge map</i>: blur the image with a Gaussian of width \(\sigma\), then take the size of the gradient. Tension makes the curve contract like a rubber band. Bending keeps it smooth. The edge term pulls points onto strong edges. On top of that, a <i>balloon</i> force \(\kappa\) (Cohen, 1991) pushes every point along its normal: \(\kappa &gt; 0\) inflates the curve and \(\kappa &lt; 0\) deflates it. In each iteration every point takes a small step downhill.</p>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tab-btn-snake" aria-selected="true" aria-controls="tab-snake">3a &middot; Snake</button>
+    <button role="tab" id="tab-btn-grow" aria-selected="false" aria-controls="tab-grow">3b &middot; Region growing (optional)</button>
+  </div>
+
+  <div id="tab-snake" role="tabpanel" aria-labelledby="tab-btn-snake">
+    <ol class="tasks">
+      <li><b>3.1</b> Pick <i>Draw a loop</i> and draw a loop well outside the tumor. The curve starts moving as soon as you let go. Where does it stop?</li>
+      <li><b>3.2</b> Switch the background to <i>Edge map</i>, then turn on <i>Force field</i>. Arrows only appear near edges, because the snake cannot feel an edge more than a few &sigma; away. Increase &sigma; and look again.</li>
+      <li><b>3.3</b> Pick <i>Click a seed</i> and click in the middle of the tumor. The balloon inflates the curve until something stops it. Try &kappa; = 0.3 and &kappa; = 0.6, on image A and on image C. Where does the curve stop: on texture inside the tumor, at the inner edge of the bright rim, at its outer edge, or nowhere at all?</li>
+      <li><b>3.4</b> Set &beta; to 0, then to 2. Then turn &alpha; up. Describe what each term does to the curve.</li>
+    </ol>
+
+    <div class="lab">
+      <figure class="fig">
+        <canvas class="view" id="s-canvas" width="512" height="512"></canvas>
+        <figcaption><b>Fig. 3a.</b> The snake <span class="sw snake"></span> and where it started (dashed). Arrows on the curve: <span class="sw edge"></span> edge pull, <span class="sw balloon"></span> balloon, <span class="sw internal"></span> tension + bending, drawn 15&times; longer than the step they cause.</figcaption>
+      </figure>
+
+      <div class="controls">
+        <fieldset>
+          <legend>Start</legend>
+          <div class="seg" role="radiogroup" aria-label="Starting curve">
+            <label><input type="radio" name="s-mode" value="loop" checked><span>Draw a loop (shrinks)</span></label>
+            <label><input type="radio" name="s-mode" value="seed"><span>Click a seed (grows)</span></label>
+          </div>
+          <p class="small" id="s-mode-hint"></p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Run</legend>
+          <div class="row" style="margin-top:0">
+            <button id="s-run" class="primary" disabled>Run</button>
+            <button id="s-step" disabled>Step &times;10</button>
+            <button id="s-reset" disabled>Back to start</button>
+            <button id="s-clear" disabled>Clear</button>
+          </div>
+          <label class="slider"><span>Speed</span><output id="s-speed-out">4 it/frame</output>
+            <input id="s-speed" type="range" min="1" max="20" value="4"></label>
+          <p class="small" id="s-status">Draw a starting curve on the image.</p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Energy weights</legend>
+          <label class="slider"><span>&alpha; tension</span><output id="s-alpha-out"></output>
+            <input id="s-alpha" type="range" min="0" max="2" step="0.05"></label>
+          <label class="slider"><span>&beta; bending</span><output id="s-beta-out"></output>
+            <input id="s-beta" type="range" min="0" max="2" step="0.05"></label>
+          <label class="slider"><span>w edge pull</span><output id="s-wedge-out"></output>
+            <input id="s-wedge" type="range" min="0" max="3" step="0.1"></label>
+          <label class="slider"><span>&kappa; balloon (&minus; deflate, + inflate)</span><output id="s-kappa-out"></output>
+            <input id="s-kappa" type="range" min="-1" max="1" step="0.05"></label>
+          <label class="slider"><span>&sigma; blur for the edge map</span><output id="s-sigma-out"></output>
+            <input id="s-sigma" type="range" min="0.5" max="6" step="0.5"></label>
+          <div class="row"><button id="s-defaults">Default weights</button></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Show</legend>
+          <div class="seg" role="radiogroup" aria-label="Background">
+            <label><input type="radio" name="s-bg" value="mri" checked><span>MRI</span></label>
+            <label><input type="radio" name="s-bg" value="edge"><span>Edge map P</span></label>
+          </div>
+          <label class="check"><input type="checkbox" id="s-field"><span>Force field (what the snake can feel)</span></label>
+          <label class="check"><input type="checkbox" id="s-forces" checked><span>Forces on the curve</span></label>
+        </fieldset>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-grow" role="tabpanel" aria-labelledby="tab-btn-grow" hidden>
+    <p>Region growing is a simpler alternative that works on regions instead of edges. Start from one seed pixel and keep adding neighbors whose intensity is within \(T\) of the region&rsquo;s mean (Adams and Bischof, 1994). The animation adds one ring of neighbors at a time.</p>
+    <ol class="tasks">
+      <li><b>3.5</b> Click inside the tumor. Raise \(T\) slowly and watch for the moment the region leaks out.</li>
+      <li><b>3.6</b> Put a seed in the dark center, then one on the bright rim. Why are the results so different?</li>
+    </ol>
+    <div class="lab">
+      <figure class="fig">
+        <canvas class="view" id="g-canvas" width="512" height="512"></canvas>
+        <figcaption><b>Fig. 3b.</b> Region grown from your seed <span class="sw grow"></span>. Click to place a seed.</figcaption>
+      </figure>
+      <div class="controls">
+        <fieldset>
+          <legend>Rule</legend>
+          <label class="slider"><span>Tolerance T</span><output id="g-t-out"></output>
+            <input id="g-t" type="range" min="1" max="100" value="20"></label>
+          <p class="small" style="margin:4px 0 2px">Compare each new neighbor with</p>
+          <div class="seg" role="radiogroup" aria-label="Comparison">
+            <label><input type="radio" name="g-rule" value="mean" checked><span>Region mean</span></label>
+            <label><input type="radio" name="g-rule" value="seed"><span>Seed value</span></label>
+          </div>
+          <label class="slider"><span>Smooth first, &sigma;</span><output id="g-sigma-out"></output>
+            <input id="g-sigma" type="range" min="0" max="3" step="0.25" value="1"></label>
+        </fieldset>
+        <fieldset>
+          <legend>Run</legend>
+          <div class="row" style="margin-top:0">
+            <button id="g-replay" disabled>Replay growth</button>
+            <button id="g-clear" disabled>Clear</button>
+          </div>
+          <p class="small" id="g-status">Click inside the tumor to place a seed.</p>
+        </fieldset>
+      </div>
+    </div>
+  </div>
+
+  <div class="questions">
+    <h3>Questions</h3>
+    <ol>
+      <li>Start the snake from two different places. Do you get the same answer?</li>
+      <li>The skull and the ventricle walls are strong edges too. What keeps the snake off them, and when does that fail?</li>
+      <li>Suppose the curve leaks out through a weak stretch of boundary. Which weight would you change, and what does that cost you elsewhere?</li>
+    </ol>
+  </div>
+  <details class="discuss">
+    <summary>What you should notice</summary>
+    <ul>
+      <li>The snake does not know what a tumor is. It stops at whatever edge is nearest and strong enough to hold off tension and balloon.</li>
+      <li>Far from an edge the force field is zero. This is the <i>capture range</i> problem. A larger &sigma; widens the range, but it also rounds off corners and can merge the two edges of a thin rim into one.</li>
+      <li>Shrunk from outside, the loop usually wraps the tumor well, but it can snag on a nearby ventricle wall. Grown from a seed on image C, it stops at the inner edge of the rim and leaves the rim out. Both are local minima of the same energy, and which one you land in depends on where you started.</li>
+      <li>On the real image A a seeded balloon often has no good setting at all. A weak balloon gets caught on texture inside the tumor. A strong one finds the weakest stretch of the rim, breaks through, and floods the brain until the skull stops it. That is why balloons are usually combined with region terms (as in Chan&ndash;Vese) or with a better edge map.</li>
+      <li>Unlike a threshold, the result is always one smooth closed curve with no holes and no stray blobs. That built-in shape prior is the snake&rsquo;s main strength.</li>
+      <li>Region growing follows intensity, not edges. It leaks as soon as a neighbor of similar brightness touches the region, and a heterogeneous tumor leaves it full of holes.</li>
+    </ul>
+  </details>
+</section>
+
+<!-- ================================================================ 4 -->
+<section id="compare">
+  <h2><span class="num">4</span>Compare the masks</h2>
+  <p>These are the masks you made for the current image. Two numbers say how far apart two masks \(A\) and \(B\) are:</p>
+  <ul>
+    <li><b>Dice</b> \(= \dfrac{2\,\lvert A \cap B\rvert}{\lvert A\rvert + \lvert B\rvert}\). It is 1 when the masks are identical and 0 when they do not overlap at all.</li>
+    <li><b>HD95</b>, the 95th-percentile Hausdorff distance. Take each boundary pixel of one mask, measure its distance to the nearest boundary pixel of the other, and report the 95th percentile of those distances, in pixels. It catches leaks and stray blobs that Dice barely registers.</li>
+  </ul>
+
+  <div class="lab">
+    <figure class="fig">
+      <canvas class="view" id="c-canvas" width="512" height="512" style="cursor:default"></canvas>
+      <figcaption><b>Fig. 4.</b> <span id="c-caption">All masks on the same slice.</span></figcaption>
+    </figure>
+    <div class="controls">
+      <fieldset>
+        <legend>View</legend>
+        <div class="seg" role="radiogroup" aria-label="Comparison view">
+          <label><input type="radio" name="c-view" value="outline" checked><span>Outlines</span></label>
+          <label><input type="radio" name="c-view" value="agree"><span>Agreement map</span></label>
+        </div>
+        <p class="small" id="c-agree-legend" hidden>Color shows how many of the ticked masks include each pixel: <span class="ramp"></span> from one mask to all of them.</p>
+      </fieldset>
+      <fieldset>
+        <legend>Masks</legend>
+        <div id="c-layers"></div>
+      </fieldset>
+      <fieldset>
+        <legend>Reference for the table</legend>
+        <select id="c-ref"></select>
+      </fieldset>
+      <fieldset>
+        <div class="row" style="margin-top:0"><button id="c-download">Save figure as PNG</button></div>
+      </fieldset>
+    </div>
+  </div>
+
+  <div class="strip" id="c-thumbs"></div>
+  <div class="table-wrap"><table id="c-table"></table></div>
+  <h3>Dice between every pair</h3>
+  <div class="table-wrap"><table class="matrix" id="c-pairs"></table></div>
+
+  <div class="questions">
+    <h3>Questions</h3>
+    <ol>
+      <li>Switch to the agreement map. Where do the methods agree, and where do they not?</li>
+      <li>Image A has no ground truth. Which mask would you pick as the reference, and why is that choice uncomfortable?</li>
+      <li>On image C, which method came closest to the truth? Is that the one you expected?</li>
+      <li>Find a pair with a high Dice but a large HD95. What does the difference look like on the image?</li>
+    </ol>
+  </div>
+  <details class="discuss">
+    <summary>What you should notice</summary>
+    <ul>
+      <li>Most disagreement sits on the boundary. The rest shows up in a few typical places: the necrotic center (Otsu without hole filling), inner against outer rim (the snake), and leaks into neighboring tissue (region growing).</li>
+      <li>Dice is forgiving for large objects. A small stray blob far away hardly changes it, but it sends HD95 up.</li>
+      <li>For real patients the reference is a human drawing. Any method tuned or trained on such drawings, including deep networks trained on BraTS, inherits that person&rsquo;s definition of the tumor and their variability. That takes you back to Exercise 1.</li>
+    </ul>
+  </details>
+</section>
+
+<!-- ================================================================ 5 -->
+<section id="notes">
+  <h2><span class="num">5</span>Summary and reading</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th></th><th>By hand</th><th>Otsu threshold</th><th>Active contour</th></tr></thead>
+      <tbody>
+        <tr><th>What you supply</th><td>Every boundary pixel</td><td>Box, smoothing and clean-up steps (the threshold itself is automatic)</td><td>A starting curve and five weights: &alpha;, &beta;, w, &kappa;, &sigma;</td></tr>
+        <tr><th>What it uses</th><td>Your knowledge of anatomy</td><td>The intensity histogram, nothing else</td><td>Edges, plus a preference for smooth curves</td></tr>
+        <tr><th>Typical failure</th><td>Slow; differs between attempts and between people</td><td>Takes everything that is equally bright; holes and stray blobs</td><td>Sticks to the nearest edge; leaks through weak edges; depends on the start</td></tr>
+        <tr><th>Shape of the result</th><td>Anything</td><td>Anything, often in pieces</td><td>One smooth closed curve</td></tr>
+        <tr><th>Same result twice?</th><td>No</td><td>Yes, given the same choices</td><td>Yes, given the same start and weights</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Going further</h3>
+  <p>Gradient vector flow (Xu and Prince, 1998) spreads the edge forces outward so a snake can feel an edge from far away. Level sets and the Chan&ndash;Vese model (2001) use region statistics instead of edges and let the curve split and merge. Graph cuts find a global optimum instead of a local one. Today most tumor segmentation is done by convolutional networks such as the U-Net, trained on thousands of hand-drawn masks.</p>
+
+  <h3>References</h3>
+  <ol class="refs">
+    <li>N. Otsu. A threshold selection method from gray-level histograms. <i>IEEE Trans. Systems, Man, and Cybernetics</i> 9(1):62&ndash;66, 1979.</li>
+    <li>M. Kass, A. Witkin, D. Terzopoulos. Snakes: active contour models. <i>International Journal of Computer Vision</i> 1(4):321&ndash;331, 1988.</li>
+    <li>L. D. Cohen. On active contour models and balloons. <i>CVGIP: Image Understanding</i> 53(2):211&ndash;218, 1991.</li>
+    <li>R. Adams, L. Bischof. Seeded region growing. <i>IEEE Trans. Pattern Analysis and Machine Intelligence</i> 16(6):641&ndash;647, 1994.</li>
+    <li>C. Xu, J. L. Prince. Snakes, shapes, and gradient vector flow. <i>IEEE Trans. Image Processing</i> 7(3):359&ndash;369, 1998.</li>
+    <li>T. F. Chan, L. A. Vese. Active contours without edges. <i>IEEE Trans. Image Processing</i> 10(2):266&ndash;277, 2001.</li>
+    <li>O. Ronneberger, P. Fischer, T. Brox. U-Net: convolutional networks for biomedical image segmentation. <i>MICCAI</i>, LNCS 9351:234&ndash;241, 2015.</li>
+    <li>B. H. Menze et al. The multimodal brain tumor image segmentation benchmark (BRATS). <i>IEEE Trans. Medical Imaging</i> 34(10):1993&ndash;2024, 2015.</li>
+    <li>L. R. Dice. Measures of the amount of ecologic association between species. <i>Ecology</i> 26(3):297&ndash;302, 1945.</li>
+  </ol>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>MRI images A and B by Hellerhoff via Wikimedia Commons, licensed CC BY-SA 3.0. Image C is a simulated phantom made for this lab.</p>
+    <p>The algorithms on this page are written out in plain JavaScript in the <code>js/</code> folder so you can read them next to the lecture notes.</p>
+  </div>
+</footer>
+
+</body>
+</html>
